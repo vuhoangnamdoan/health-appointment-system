@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
+import uuid
 
 
 class Notification(models.Model):
@@ -18,20 +19,21 @@ class Notification(models.Model):
     ]
     
     # Notification type choices
+    APPOINTMENT_BOOK = 'book'
+    APPOINTMENT_CANCEL = 'cancel'
+    APPOINTMENT_RESCHEDULE = 'reschedule'
     APPOINTMENT_REMINDER = 'appointment_reminder'
-    APPOINTMENT_CONFIRMED = 'appointment_confirmed'
-    APPOINTMENT_CANCELLED = 'appointment_cancelled'
-    APPOINTMENT_RESCHEDULED = 'appointment_rescheduled'
     SYSTEM_NOTIFICATION = 'system_notification'
     
     TYPE_CHOICES = [
+        (APPOINTMENT_BOOK, _('Appointment Booked')),
+        (APPOINTMENT_CANCEL, _('Appointment Cancelled')),
+        (APPOINTMENT_RESCHEDULE, _('Appointment Rescheduled')),
         (APPOINTMENT_REMINDER, _('Appointment Reminder')),
-        (APPOINTMENT_CONFIRMED, _('Appointment Confirmed')),
-        (APPOINTMENT_CANCELLED, _('Appointment Cancelled')),
-        (APPOINTMENT_RESCHEDULED, _('Appointment Rescheduled')),
         (SYSTEM_NOTIFICATION, _('System Notification')),
     ]
     
+    notification_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='notifications')
     title = models.CharField(max_length=255)
     message = models.TextField()
@@ -41,6 +43,10 @@ class Notification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     read_at = models.DateTimeField(null=True, blank=True)
+
+    notification_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    appointment_id = models.ForeignKey('appointments.Appointment', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    type_id = models.ForeignKey('NotificationType', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     
     class Meta:
         ordering = ['-created_at']
@@ -65,7 +71,31 @@ class Notification(models.Model):
         """Archive notification"""
         self.status = self.ARCHIVED
         self.save()
-
+    
+    @classmethod
+    def create_appointment_notification(cls, appointment, notification_type):
+        """Create appointment notification"""
+        if notification_type == cls.APPOINTMENT_BOOK:
+            title = "Appointment Booked"
+            message = f"Your appointment with Dr. {appointment.doctor.last_name} on {appointment.date} at {appointment.availability.start_time} has been booked."
+        elif notification_type == cls.APPOINTMENT_RESCHEDULE:
+            title = "Appointment Rescheduled"
+            message = f"Your appointment with Dr. {appointment.doctor.last_name} has been rescheduled to {appointment.date} at {appointment.availability.start_time}."
+        elif notification_type == cls.APPOINTMENT_CANCEL:
+            title = "Appointment Cancelled"
+            message = f"Your appointment with Dr. {appointment.doctor.last_name} on {appointment.date} at {appointment.availability.start_time} has been cancelled."
+        else:
+            title = "Appointment Reminder"
+            message = f"Reminder: Your appointment with Dr. {appointment.doctor.last_name} is scheduled for {appointment.date} at {appointment.availability.start_time}."
+        
+        return cls.objects.create(
+            recipient=appointment.patient.user,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            appointment_id=str(appointment.appointment_id)
+        )
+        
 
 class NotificationTemplate(models.Model):
     """Model for notification templates"""
@@ -151,3 +181,21 @@ class AppointmentReminder(models.Model):
         """Cancel reminder"""
         self.status = self.CANCELLED
         self.save()
+    
+    def schedule_reminder_notification(self, appointment):
+        """Schedule a reminder notification for the appointment"""
+        # Calculate reminder time (24 hours before appointment)
+        appointment_datetime = timezone.datetime.combine(
+            appointment.date, 
+            appointment.availability.start_time, 
+            tzinfo=timezone.get_current_timezone()
+        )
+        reminder_time = appointment_datetime - timezone.timedelta(days=1)
+        
+        # Create the reminder with scheduled time
+        return AppointmentReminder.objects.create(
+            appointment_id=str(appointment.appointment_id),
+            recipient=appointment.patient.user,
+            message=f"Reminder: Your appointment with Dr. {appointment.doctor.last_name} is tomorrow at {appointment.availability.start_time}.",
+            scheduled_time=reminder_time
+        )

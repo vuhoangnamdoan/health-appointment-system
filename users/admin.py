@@ -66,7 +66,7 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(DoctorProfile)
 class DoctorProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'doctor_id', 'specialization', 'years_of_experience')
+    list_display = ('doctor_id', 'first_name', 'last_name', 'speciality', 'dob', 'experience', 'working_day', 'from', 'to')
     search_fields = ('user__email', 'user__first_name', 'user__last_name', 'specialization', 'doctor_id')
     list_filter = ('specialization', 'years_of_experience')
     readonly_fields = ('doctor_id',)
